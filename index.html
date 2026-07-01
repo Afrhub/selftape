@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Self-Tape Reader</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1115; --surface:#171a21; --surface2:#1e222b; --line:#2a2f3a;
+    --text:#eef1f6; --muted:#9aa4b2; --accent:#12B886; --accent-d:#0c8f68;
+    --danger:#e5484d; --warn:#e6a817; --radius:14px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f7f9; --surface:#ffffff; --surface2:#f0f2f5; --line:#e2e6ec;
+      --text:#12151b; --muted:#5b6673; }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex;flex-direction:column;overscroll-behavior:none}
+  header{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);
+    position:sticky;top:0;background:var(--bg);z-index:5}
+  header .logo{width:22px;height:22px;flex:0 0 auto}
+  header h1{font-size:16px;font-weight:600;margin:0;letter-spacing:.3px}
+  header .sp{flex:1}
+  header button.icon{background:none;border:none;color:var(--muted);font-size:20px;padding:6px}
+  main{flex:1;overflow:auto;padding:16px;padding-bottom:120px}
+  .screen{display:none;max-width:640px;margin:0 auto}
+  .screen.active{display:block}
+  h2{font-size:20px;font-weight:600;margin:4px 0 14px}
+  p.sub{color:var(--muted);margin:0 0 16px}
+  label.fld{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
+  textarea,input[type=text],input[type=password],select{width:100%;background:var(--surface);color:var(--text);
+    border:1px solid var(--line);border-radius:var(--radius);padding:12px;font:inherit}
+  textarea{min-height:180px;resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:14px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin:10px 0}
+  .row{display:flex;gap:10px;align-items:center}
+  .btn{appearance:none;border:none;border-radius:var(--radius);padding:14px 18px;font:inherit;font-weight:600;
+    background:var(--surface2);color:var(--text);border:1px solid var(--line);cursor:pointer}
+  .btn.primary{background:var(--accent);color:#04160f;border-color:transparent}
+  .btn.ghost{background:none}
+  .btn.danger{color:var(--danger);border-color:var(--line)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.block{width:100%;margin-top:12px}
+  .btn.sm{padding:8px 12px;font-size:14px;border-radius:10px}
+  .actions{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+    background:linear-gradient(to top,var(--bg) 70%,transparent);display:flex;gap:10px;max-width:672px;margin:0 auto}
+  .actions .btn{flex:1}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;background:var(--surface2);border:1px solid var(--line);
+    font-size:12px;color:var(--muted)}
+  .linerow{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line)}
+  .linerow select{width:auto;min-width:110px;padding:8px;font-size:14px}
+  .linerow textarea{min-height:44px;font-family:inherit;font-size:15px;padding:8px}
+  .linerow .x{background:none;border:none;color:var(--muted);font-size:18px;padding:4px 6px}
+  .castrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .castrow .name{font-weight:600;min-width:90px}
+  .castrow select{flex:1}
+  .me-badge{background:var(--accent);color:#04160f;font-weight:600;font-size:12px;padding:3px 9px;border-radius:999px}
+  video{width:100%;border-radius:var(--radius);background:#000;aspect-ratio:9/16;object-fit:cover}
+  .cuebar{position:absolute;left:0;right:0;bottom:0;padding:14px;background:linear-gradient(to top,rgba(0,0,0,.72),transparent)}
+  .cuewho{font-size:13px;color:#cbd3de;text-shadow:0 1px 3px #000}
+  .cuewho b{color:#fff;font-size:18px}
+  .vstage{position:relative}
+  .countdown{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:96px;font-weight:700;
+    color:#fff;text-shadow:0 2px 12px #000;background:rgba(0,0,0,.35);border-radius:var(--radius)}
+  .rec-dot{width:11px;height:11px;border-radius:50%;background:var(--danger);animation:blink 1s infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .takerow{display:flex;align-items:center;gap:12px}
+  .takerow video{width:78px;aspect-ratio:9/16;flex:0 0 auto}
+  .takerow .meta{flex:1;min-width:0}
+  .takerow .meta .t{font-weight:600}
+  .star{background:none;border:none;font-size:20px;color:var(--muted)}
+  .star.on{color:var(--warn)}
+  .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--surface2);
+    border:1px solid var(--line);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:.2s;pointer-events:none;z-index:20}
+  .toast.show{opacity:1}
+  .warn{background:color-mix(in srgb,var(--warn) 16%,transparent);border-color:var(--warn);color:var(--text);
+    padding:10px 12px;border-radius:10px;font-size:14px;margin:10px 0}
+  .steps{display:flex;gap:6px;margin-bottom:14px}
+  .steps span{flex:1;height:4px;border-radius:2px;background:var(--line)}
+  .steps span.on{background:var(--accent)}
+  .listen{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+  .level{flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden}
+  .level i{display:block;height:100%;width:0;background:var(--accent)}
+  .muted{color:var(--muted)} .center{text-align:center} .sm{font-size:14px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <svg class="logo" viewBox="0 0 680 400" aria-hidden="true"><g fill="none" stroke="#12B886" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"><path d="M412 104 L300 290"/><path d="M296 104 L357 194"/><path d="M357 194 L357 322"/></g><circle cx="350" cy="150" r="15" fill="none" stroke="#12B886" stroke-width="11"/><circle cx="396" cy="266" r="15" fill="none" stroke="#12B886" stroke-width="11"/></svg>
+  <h1>Self-Tape Reader</h1>
+  <span class="sp"></span>
+  <button class="icon" id="navSettings" aria-label="Settings">⚙</button>
+</header>
+<main>
+
+  <!-- IMPORT -->
+  <section class="screen active" id="s-import">
+    <div class="steps"><span class="on"></span><span></span><span></span><span></span></div>
+    <h2>Import your sides</h2>
+    <p class="sub">Paste the scene, or upload a PDF / text file of your audition sides.</p>
+    <label class="fld" for="paste">Paste script</label>
+    <textarea id="paste" placeholder="SARAH&#10;Where were you last night?&#10;&#10;JACK&#10;Out. Just out."></textarea>
+    <div class="row" style="margin-top:12px">
+      <button class="btn sm" onclick="document.getElementById('file').click()">Upload PDF / .txt</button>
+      <span id="fileName" class="pill" style="display:none"></span>
+    </div>
+    <input type="file" id="file" accept=".pdf,.txt,text/plain,application/pdf" hidden>
+    <div id="importErr" class="warn" style="display:none"></div>
+  </section>
+
+  <!-- REVIEW -->
+  <section class="screen" id="s-review">
+    <div class="steps"><span class="on"></span><span class="on"></span><span></span><span></span></div>
+    <h2>Check the parse</h2>
+    <p class="sub">The app guessed the characters and lines. Fix anything wrong before you record — this is your safety net for messy PDFs.</p>
+    <div class="warn" id="parseNote"></div>
+    <div id="reviewList"></div>
+    <button class="btn sm ghost" id="addLine" style="margin-top:10px">＋ Add line</button>
+  </section>
+
+  <!-- CAST -->
+  <section class="screen" id="s-cast">
+    <div class="steps"><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div>
+    <h2>Cast the scene</h2>
+    <p class="sub">Pick your character. Every other role gets its own AI voice — change any of them.</p>
+    <label class="fld">I'm playing</label>
+    <select id="myChar"></select>
+    <div id="castList" style="margin-top:8px"></div>
+    <div class="warn" id="ttsMode"></div>
+  </section>
+
+  <!-- RECORD -->
+  <section class="screen" id="s-record">
+    <div class="vstage">
+      <video id="preview" playsinline muted autoplay></video>
+      <button id="flipCam" class="btn sm" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,.55);color:#fff;border:none">⟲ Flip</button>
+      <div class="cuebar">
+        <div class="cuewho" id="cueWho">Ready</div>
+      </div>
+      <div class="countdown" id="countdown" style="display:none"></div>
+      <div id="camOff" style="position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.6);border-radius:var(--radius);padding:20px;text-align:center;color:#fff">
+        <div style="font-size:40px">📷</div>
+        <button class="btn primary" id="enableCam">Enable camera</button>
+        <div class="sm" style="color:#cbd3de;max-width:260px">Your browser will ask for camera &amp; mic permission. On a phone this needs an HTTPS address.</div>
+      </div>
+    </div>
+    <div class="listen" id="listenBar" style="margin-top:10px;display:none">
+      <span class="rec-dot" id="recDot" style="display:none"></span>
+      <span id="listenLabel">Listening for your cue…</span>
+      <span class="level"><i id="levelBar"></i></span>
+    </div>
+    <div class="row" id="cueControls" style="margin-top:12px;display:none;gap:8px">
+      <button class="btn sm" id="repeatCue">↺ Repeat cue</button>
+      <button class="btn sm primary" id="advanceCue">Next cue ▸</button>
+    </div>
+    <p class="sm muted center" id="recHint" style="margin-top:14px">
+      Cameras & mic ready. Reader lines play out loud on cue while you record.</p>
+  </section>
+
+  <!-- TAKES -->
+  <section class="screen" id="s-takes">
+    <h2>Your takes</h2>
+    <p class="sub" id="takesSub">Keep the best, delete the rest, then export.</p>
+    <div id="takesList"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="screen" id="s-settings">
+    <h2>Settings</h2>
+    <div class="card">
+      <label class="fld" style="margin-top:0">ElevenLabs API key (optional)</label>
+      <input type="password" id="elevenKey" placeholder="sk_… — enables natural, distinct voices">
+      <p class="sm muted" style="margin:8px 0 0">Without a key the app uses your device's built-in voices (free, but more robotic). The key stays on this device only.</p>
+    </div>
+    <div class="card">
+      <label class="fld" style="margin-top:0">Camera</label>
+      <select id="camSel"></select>
+      <label class="fld">Microphone</label>
+      <select id="micSel"></select>
+      <label class="fld">Video quality</label>
+      <select id="quality"><option value="1080">1080p</option><option value="720" selected>720p</option><option value="480">480p</option></select>
+    </div>
+    <div class="card">
+      <label class="fld" style="margin-top:0">Auto-advance sensitivity</label>
+      <input type="range" id="vadSens" min="1" max="9" value="5" style="width:100%">
+      <p class="sm muted" style="margin:8px 0 0">How eagerly the reader jumps in after you stop speaking. If it interrupts you, lower it. You can always tap “Next cue”.</p>
+    </div>
+  </section>
+
+</main>
+
+<div class="actions" id="actions"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+// ---------- state ----------
+const S = {
+  lines: [],            // [{character, text}]
+  characters: [],       // unique names in order
+  myChar: null,
+  voices: {},           // character -> voice descriptor
+  clips: {},            // lineIndex -> blob url (eleven mode)
+  takes: [],            // {url, blob, name, fav, ts}
+  stream: null, recorder: null, chunks: [],
+  running: false, curIdx: 0, lastReaderIdx: -1,
+  advanceResolve: null,
+  facing: "user", flipped: false,
+};
+const settings = {
+  elevenKey: localStorage.getItem("elevenKey") || "",
+  cam: localStorage.getItem("cam") || "",
+  mic: localStorage.getItem("mic") || "",
+  quality: localStorage.getItem("quality") || "720",
+  vad: +(localStorage.getItem("vad") || 5),
+};
+const ttsMode = () => settings.elevenKey ? "eleven" : "speech";
+
+// ElevenLabs preset voices (public). Editable idea for v2.
+const ELEVEN = [
+  {id:"EXAVITQu4vr4xnSDxMaL", label:"Young female · US"},
+  {id:"ThT5KcBeYPX3keUQqHPh", label:"Older female · UK"},
+  {id:"TxGEqnHWrfWFTfGW9XjX", label:"Young male · US"},
+  {id:"onwK4e9ZLuTAKqWW03F9", label:"Mature male · UK"},
+  {id:"XB0fDUnXU5powFXDhCwa", label:"Neutral female · US"},
+  {id:"pNInz6obpgDQGcFmaJgB", label:"Mature male · US"},
+];
+
+// ---------- tiny helpers ----------
+const $ = s => document.querySelector(s);
+const el = (t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e;};
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),1800);}
+function show(id){document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active",s.id===id));setActions(id);window.scrollTo(0,0);}
+
+// ---------- script parser ----------
+function parseScript(text){
+  const raw = text.split(/\r?\n/);
+  const out = []; let cur = null;
+  const norm = s => s.replace(/\s+/g," ").trim().toUpperCase();
+  const words = s => s.split(/\s+/).filter(Boolean).length;
+  const looksName = s => s.length>0 && s.length<=30 && words(s)<=4;
+  const allCaps = s => {const L=s.replace(/[^A-Za-z]/g,"");return L.length>0 && L===L.toUpperCase();};
+  const isScene = s => /^(INT|EXT|INT\.\/EXT|I\/E)[. ]/i.test(s) || /^(FADE|CUT TO|SMASH CUT|DISSOLVE|SCENE \d)/i.test(s);
+  const parenOnly = s => /^\(.*\)$/.test(s);
+  const inlineRe = /^([A-Za-z][A-Za-z0-9 .'’\-]{0,30}?):\s*(.+)$/;
+  const cueRe = /^([A-Z][A-Z0-9 .'’\-]{1,30})\s*(\(.*\))?$/;
+  const push = () => { if(cur){const t=cur.parts.join(" ").replace(/\s+/g," ").trim(); if(t) out.push({character:cur.character,text:t});} cur=null; };
+  for(const line of raw){
+    const s = line.trim();
+    if(!s) continue;
+    if(isScene(s)){ push(); continue; }
+    let m;
+    if((m = s.match(inlineRe)) && looksName(m[1].trim())){
+      push(); out.push({character:norm(m[1]), text:m[2].trim()}); continue;
+    }
+    if((m = s.match(cueRe)) && looksName(m[1].trim()) && allCaps(m[1].trim())){
+      push(); cur = {character:norm(m[1]), parts:[]}; continue;
+    }
+    if(parenOnly(s)) continue;              // stage direction
+    if(cur) cur.parts.push(s.replace(/^\(.*?\)\s*/,"")); // strip leading parenthetical
+  }
+  push();
+  // merge consecutive same-character blocks
+  const merged=[];
+  for(const l of out){const last=merged[merged.length-1];
+    if(last && last.character===l.character) last.text=(last.text+" "+l.text).trim();
+    else merged.push({...l});}
+  return merged;
+}
+// runnable self-check (open console, call __parserSelfCheck())
+window.__parserSelfCheck = function(){
+  const t="INT. KITCHEN - DAY\nSARAH\nWhere were you last night?\nJACK\n(smiling)\nOut. Just out.\nSARAH: I don't believe you.";
+  const r=parseScript(t);
+  console.assert(r.length===3, "expected 3 lines, got", r.length, r);
+  console.assert(r[0].character==="SARAH", "line0", r[0]);
+  console.assert(r[1].character==="JACK" && /Out/.test(r[1].text), "line1", r[1]);
+  console.assert(r[2].character==="SARAH" && /believe/.test(r[2].text), "line2", r[2]);
+  console.log("parser self-check ok", r); return r;
+};
+
+function loadLines(lines){
+  S.lines = lines;
+  S.characters = [...new Set(lines.map(l=>l.character))];
+  renderReview(); renderCast();
+}
+
+// ---------- import ----------
+$("#file").addEventListener("change", async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  $("#fileName").style.display="inline-block"; $("#fileName").textContent=f.name;
+  $("#importErr").style.display="none";
+  try{
+    let text="";
+    if(f.type==="application/pdf" || f.name.toLowerCase().endsWith(".pdf")){
+      const buf = await f.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+      for(let p=1;p<=pdf.numPages;p++){
+        const page = await pdf.getPage(p);
+        const c = await page.getTextContent();
+        // rebuild lines using y-position so cues stay on their own line
+        let last=null, buf2="";
+        for(const it of c.items){
+          const y = it.transform[5];
+          if(last!==null && Math.abs(y-last)>3){ buf2+="\n"; }
+          buf2 += it.str + (it.hasEOL?"\n":" ");
+          last = y;
+        }
+        text += buf2 + "\n";
+      }
+    } else {
+      text = await f.text();
+    }
+    $("#paste").value = text.trim();
+    toast("Loaded "+f.name);
+  }catch(err){
+    $("#importErr").style.display="block";
+    $("#importErr").textContent="Couldn't read that file. Try pasting the text instead. ("+err.message+")";
+  }
+});
+
+// ---------- review ----------
+function renderReview(){
+  const wrap=$("#reviewList"); wrap.innerHTML="";
+  $("#parseNote").textContent = S.lines.length
+    ? `Found ${S.characters.length} characters across ${S.lines.length} lines. Rename a character on any row to merge it.`
+    : "Nothing parsed yet — go back and paste your sides.";
+  S.lines.forEach((ln,i)=>{
+    const r=el("div","linerow");
+    const name=el("input"); name.type="text"; name.value=ln.character; name.style.width="120px";
+    name.style.font="600 14px inherit";
+    name.oninput=()=>{ln.character=name.value.toUpperCase();};
+    name.onblur=()=>{S.characters=[...new Set(S.lines.map(l=>l.character))];};
+    const ta=el("textarea"); ta.value=ln.text; ta.oninput=()=>ln.text=ta.value;
+    const x=el("button","x","✕"); x.onclick=()=>{S.lines.splice(i,1);renderReview();};
+    r.append(name,ta,x); wrap.append(r);
+  });
+}
+$("#addLine").onclick=()=>{S.lines.push({character:S.characters[0]||"CHARACTER",text:""});renderReview();};
+
+// ---------- cast ----------
+function renderCast(){
+  S.characters=[...new Set(S.lines.map(l=>l.character))];
+  const my=$("#myChar"); my.innerHTML="";
+  S.characters.forEach(c=>{const o=el("option",null,c);o.value=c;my.append(o);});
+  if(!S.myChar || !S.characters.includes(S.myChar)) S.myChar=S.characters[0];
+  my.value=S.myChar;
+  my.onchange=()=>{S.myChar=my.value;renderCast();};
+  const list=$("#castList"); list.innerHTML="";
+  S.characters.filter(c=>c!==S.myChar).forEach((c,i)=>{
+    const r=el("div","castrow"); r.append(el("span","name",c));
+    const sel=el("select");
+    ELEVEN.forEach(v=>{const o=el("option",null,v.label);o.value=v.id;sel.append(o);});
+    const chosen=S.voices[c]?.id || ELEVEN[i%ELEVEN.length].id;
+    sel.value=chosen; S.voices[c]={mode:"eleven",id:chosen};
+    sel.onchange=()=>S.voices[c]={mode:"eleven",id:sel.value};
+    const prev=el("button","btn sm ghost","▶"); prev.title="Preview";
+    prev.onclick=()=>previewVoice(c);
+    r.append(sel,prev); list.append(r);
+  });
+  const my2=el("div","castrow"); my2.append(el("span","name",S.myChar),el("span","me-badge","YOU"));
+  list.prepend(my2);
+  $("#ttsMode").textContent = settings.elevenKey
+    ? "Natural voices on (ElevenLabs). Lines are pre-generated once, then play instantly with no delay."
+    : "⚠ Add your ElevenLabs API key in Settings — required before you can record.";
+}
+
+// ---------- voices ----------
+let _voices=[];
+function deviceVoices(){
+  const all=(window.speechSynthesis?.getVoices()||[]).filter(v=>/^en/i.test(v.lang));
+  _voices = all.length?all:(window.speechSynthesis?.getVoices()||[]);
+  return _voices;
+}
+if(window.speechSynthesis) speechSynthesis.onvoiceschanged=()=>{ if($("#s-cast").classList.contains("active")) renderCast(); };
+
+async function elevenClip(text, voiceId){
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,{
+    method:"POST",
+    headers:{"xi-api-key":settings.elevenKey,"Content-Type":"application/json","Accept":"audio/mpeg"},
+    body:JSON.stringify({text, model_id:"eleven_turbo_v2_5",
+      voice_settings:{stability:0.5, similarity_boost:0.75}})
+  });
+  if(!res.ok) throw new Error("TTS "+res.status);
+  return URL.createObjectURL(await res.blob());
+}
+function previewVoice(c){
+  const v=S.voices[c]; const sample=`Hello, I'm reading for ${c}.`;
+  if(v.mode==="eleven"){ elevenClip(sample,v.id).then(u=>new Audio(u).play()).catch(e=>toast("Preview failed: "+e.message)); }
+  else speakDevice(sample, v);
+}
+function speakDevice(text, v){
+  return new Promise(res=>{
+    const u=new SpeechSynthesisUtterance(text);
+    const vs=deviceVoices(); if(v && vs[v.idx]) u.voice=vs[v.idx];
+    if(v){u.pitch=v.pitch||1;u.rate=v.rate||1;}
+    u.onend=res; u.onerror=res; speechSynthesis.cancel(); speechSynthesis.speak(u);
+  });
+}
+// pre-generate all reader clips (eleven mode only)
+async function pregenerate(onProg){
+  S.clips={};
+  if(ttsMode()!=="eleven") return;
+  const idxs=S.lines.map((l,i)=>i).filter(i=>S.lines[i].character!==S.myChar);
+  let done=0;
+  for(const i of idxs){
+    const ln=S.lines[i]; const v=S.voices[ln.character];
+    S.clips[i]=await elevenClip(ln.text, v.id);
+    onProg && onProg(++done, idxs.length);
+  }
+}
+function playCue(i){
+  const ln=S.lines[i]; S.lastReaderIdx=i;
+  if(ttsMode()==="eleven" && S.clips[i]){
+    return new Promise(res=>{const a=new Audio(S.clips[i]);a.onended=res;a.onerror=res;S._audio=a;a.play();});
+  }
+  return speakDevice(ln.text, S.voices[ln.character]);
+}
+
+// ---------- devices / media ----------
+async function listDevices(){
+  try{
+    const ds=await navigator.mediaDevices.enumerateDevices();
+    const cams=ds.filter(d=>d.kind==="videoinput"), mics=ds.filter(d=>d.kind==="audioinput");
+    const fill=(sel,arr,cur)=>{sel.innerHTML="";arr.forEach((d,i)=>{const o=el("option",null,d.label||("Device "+(i+1)));o.value=d.deviceId;sel.append(o);});if(cur)sel.value=cur;};
+    fill($("#camSel"),cams,settings.cam); fill($("#micSel"),mics,settings.mic);
+  }catch(e){/* labels need permission; ignore */}
+}
+async function startCamera(){
+  const q={ "1080":1080,"720":720,"480":480 }[settings.quality]||720;
+  const constraints={
+    video:{ height:{ideal:q},
+      ...(settings.cam && !S.flipped ? {deviceId:{exact:settings.cam}} : {facingMode:S.facing}) },
+    audio: settings.mic?{deviceId:{exact:settings.mic}}:true
+  };
+  if(S.stream) S.stream.getTracks().forEach(t=>t.stop());
+  S.stream=await navigator.mediaDevices.getUserMedia(constraints);
+  $("#preview").srcObject=S.stream;
+  await listDevices();
+  setupVAD(S.stream);
+}
+function pickMime(){
+  const opts=["video/mp4","video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
+  for(const m of opts) if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  return "";
+}
+
+// ---------- VAD (auto-advance) ----------
+let vad={ctx:null,analyser:null,data:null,raf:0,active:false,onFire:null,speaking:false,speechStart:0,silence:0};
+function setupVAD(stream){
+  try{
+    if(vad.ctx) vad.ctx.close();
+    vad.ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=vad.ctx.createMediaStreamSource(stream);
+    vad.analyser=vad.ctx.createAnalyser(); vad.analyser.fftSize=1024;
+    vad.data=new Uint8Array(vad.analyser.fftSize); src.connect(vad.analyser);
+    loopVAD();
+  }catch(e){/* VAD optional; tap still works */}
+}
+function rms(){
+  vad.analyser.getByteTimeDomainData(vad.data);
+  let sum=0; for(let i=0;i<vad.data.length;i++){const v=(vad.data[i]-128)/128;sum+=v*v;}
+  return Math.sqrt(sum/vad.data.length);
+}
+function loopVAD(){
+  const step=()=>{
+    if(vad.analyser){
+      const level=rms();
+      $("#levelBar").style.width=Math.min(100,level*320)+"%";
+      if(vad.active){
+        const speak=0.055-(settings.vad-5)*0.006;   // sensitivity → threshold
+        const hang=1200-(settings.vad-5)*90;          // ms of silence before firing
+        const now=performance.now();
+        if(level>speak){ vad.speaking=true; vad.silence=0; if(!vad.speechStart)vad.speechStart=now; }
+        else if(vad.speaking){
+          if(!vad.silence) vad.silence=now;
+          if(now-vad.silence>hang && now-vad.speechStart>500){ fireAdvance("vad"); }
+        }
+      }
+    }
+    vad.raf=requestAnimationFrame(step);
+  };
+  cancelAnimationFrame(vad.raf); step();
+}
+function armVAD(){vad.active=true;vad.speaking=false;vad.speechStart=0;vad.silence=0;}
+function disarmVAD(){vad.active=false;}
+function fireAdvance(){ disarmVAD(); if(S.advanceResolve){const r=S.advanceResolve;S.advanceResolve=null;r();} }
+function waitForActor(){ armVAD(); return new Promise(res=>{S.advanceResolve=res;}); }
+
+$("#advanceCue").onclick=()=>fireAdvance("tap");
+$("#repeatCue").onclick=()=>{ if(S.lastReaderIdx>=0) playCue(S.lastReaderIdx); };
+async function flipCamera(){ if(S.running || !camActive()) return; S.flipped=true; S.facing=S.facing==="user"?"environment":"user";
+  try{ await startCamera(); }catch(e){ toast("Couldn't switch camera: "+e.message); } }
+$("#flipCam").onclick=flipCamera;
+const camActive=()=>!!(S.stream && S.stream.active);
+async function enableCamera(){
+  if(!settings.elevenKey){ toast("Add your ElevenLabs API key in Settings to record"); openSettings(); return; }
+  const btn=$("#enableCam"); btn.disabled=true; btn.textContent="Starting…";
+  try{ await startCamera(); }
+  catch(e){ toast("Camera/mic blocked: "+e.message); btn.disabled=false; btn.textContent="Enable camera"; return; }
+  $("#camOff").style.display="none"; setActions("s-record");
+  if(!Object.keys(S.clips).length){
+    $("#recHint").textContent="Generating voices…";
+    try{ await pregenerate((d,tot)=>{ $("#recHint").textContent=`Generating voices… ${d}/${tot}`; });
+      $("#recHint").textContent="Voices ready. Reader lines play out loud on cue while you record.";
+    }catch(e){ toast("Voice generation failed: "+e.message);
+      $("#recHint").textContent="⚠ Couldn't generate voices — check your ElevenLabs key in Settings."; }
+  } else { $("#recHint").textContent="Voices ready. Reader lines play out loud on cue while you record."; }
+  btn.disabled=false; btn.textContent="Enable camera";
+}
+$("#enableCam").onclick=enableCamera;
+
+// ---------- record run ----------
+async function beginRecording(){
+  // countdown
+  $("#countdown").style.display="flex";
+  for(let n=3;n>=1;n--){ $("#countdown").textContent=n; await sleep(700); }
+  $("#countdown").style.display="none";
+  // recorder
+  S.chunks=[]; const mime=pickMime();
+  S.recorder=new MediaRecorder(S.stream, mime?{mimeType:mime}:undefined);
+  S.recorder.ondataavailable=e=>{if(e.data.size)S.chunks.push(e.data);};
+  S.recorder.onstop=finalizeTake;
+  S.recorder.start();
+  S.running=true; S.curIdx=0; S.lastReaderIdx=-1;
+  $("#recDot").style.display="inline-block";
+  $("#listenBar").style.display="flex"; $("#cueControls").style.display="flex";
+  setActions("s-record");
+  await runFrom(0);
+}
+async function runFrom(i){
+  S.curIdx=i;
+  while(S.running && S.curIdx<S.lines.length){
+    const ln=S.lines[S.curIdx];
+    if(ln.character===S.myChar){
+      $("#cueWho").innerHTML=`<b>Your line</b>`;
+      $("#listenLabel").textContent="Listening — speak, or tap Next cue";
+      await waitForActor();
+    } else {
+      $("#cueWho").innerHTML=`<b>${ln.character}</b> <span class="muted">· AI reader</span>`;
+      $("#listenLabel").textContent=ln.character+" is reading…";
+      await playCue(S.curIdx);
+    }
+    if(!S.running) return;
+    S.curIdx++;
+  }
+  if(S.running){ $("#cueWho").innerHTML="<b>Scene complete</b>"; stopRecording(); }
+}
+function stopRecording(){
+  if(!S.running) return;
+  S.running=false; disarmVAD();
+  try{ speechSynthesis.cancel(); }catch(e){}
+  if(S._audio){S._audio.pause();S._audio=null;}
+  if(S.recorder && S.recorder.state!=="inactive") S.recorder.stop();
+  $("#recDot").style.display="none";
+}
+function finalizeTake(){
+  const blob=new Blob(S.chunks,{type:S.chunks[0]?.type||"video/webm"});
+  const url=URL.createObjectURL(blob);
+  S.takes.unshift({url,blob,name:"Take "+(S.takes.length+1),fav:false,ts:Date.now()});
+  renderTakes(); show("s-takes"); toast("Take saved");
+}
+
+// ---------- takes ----------
+function renderTakes(){
+  const wrap=$("#takesList"); wrap.innerHTML="";
+  $("#takesSub").textContent = S.takes.length? "Keep the best, delete the rest, then export." : "No takes yet.";
+  S.takes.forEach((tk,i)=>{
+    const card=el("div","card"); const row=el("div","takerow");
+    const v=el("video"); v.src=tk.url; v.controls=true; v.playsInline=true;
+    const meta=el("div","meta");
+    const name=el("input"); name.type="text"; name.value=tk.name; name.style.width="100%";
+    name.style.font="600 15px inherit"; name.oninput=()=>tk.name=name.value;
+    const when=el("div","sm muted", new Date(tk.ts).toLocaleString());
+    meta.append(name,when);
+    const star=el("button","star"+(tk.fav?" on":""),"★");
+    star.onclick=()=>{S.takes.forEach(t=>t.fav=false);tk.fav=true;renderTakes();};
+    row.append(v,meta,star); card.append(row);
+    const btns=el("div","row"); btns.style.marginTop="10px";
+    const exp=el("button","btn sm primary","Export / share"); exp.onclick=()=>exportTake(tk);
+    const del=el("button","btn sm danger","Delete");
+    del.onclick=()=>{URL.revokeObjectURL(tk.url);S.takes.splice(i,1);renderTakes();};
+    btns.append(exp,del); card.append(btns); wrap.append(card);
+  });
+}
+async function exportTake(tk){
+  const ext=(tk.blob.type.includes("mp4")?"mp4":"webm");
+  const file=new File([tk.blob], (tk.name.replace(/\s+/g,"_")||"selftape")+"."+ext, {type:tk.blob.type});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file], title:tk.name}); return; }catch(e){ if(e.name==="AbortError") return; }
+  }
+  const a=el("a"); a.href=tk.url; a.download=file.name; a.click();
+  toast("Downloading "+file.name);
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+// ---------- bottom action bar per screen ----------
+function setActions(id){
+  const bar=$("#actions"); bar.innerHTML="";
+  const add=(label,cls,fn)=>{const b=el("button","btn "+(cls||""),label);b.onclick=fn;bar.append(b);return b;};
+  if(id==="s-import"){
+    add("Parse sides →","primary",()=>{
+      const t=$("#paste").value.trim();
+      if(!t){toast("Paste or upload your sides first");return;}
+      const lines=parseScript(t);
+      if(!lines.length){$("#importErr").style.display="block";$("#importErr").textContent="Couldn't find any character lines. Check the format, or add lines by hand on the next screen.";}
+      loadLines(lines.length?lines:[{character:"CHARACTER",text:""}]); show("s-review");
+    });
+  } else if(id==="s-review"){
+    add("← Back","ghost",()=>show("s-import"));
+    add("Cast the scene →","primary",()=>{ if(!S.lines.length){toast("Add at least one line");return;} show("s-cast"); });
+  } else if(id==="s-cast"){
+    add("← Back","ghost",()=>show("s-review"));
+    add("Set up recording →","primary",()=>{
+      if(!settings.elevenKey){ toast("Add your ElevenLabs API key in Settings to record"); openSettings(); return; }
+      show("s-record");   // record screen shows the "Enable camera" overlay; user taps to grant
+    });
+  } else if(id==="s-record"){
+    const live=camActive();
+    $("#camOff").style.display = live ? "none" : "flex";
+    $("#listenBar").style.display = S.running ? "flex" : "none";
+    $("#cueControls").style.display = S.running ? "flex" : "none";
+    if(S.running){ add("■ Stop","danger",stopRecording); }
+    else {
+      add("← Back","ghost",()=>{ if(S.stream)S.stream.getTracks().forEach(t=>t.stop()); show("s-cast"); });
+      add("● Record take","primary",()=>{ if(!camActive()){ enableCamera(); return; } beginRecording(); });
+      if(S.takes.length) add("Takes ("+S.takes.length+")","ghost",()=>show("s-takes"));
+    }
+  } else if(id==="s-takes"){
+    add("＋ New take","ghost",()=>show("s-record"));
+    add("Done","primary",()=>show("s-import"));
+  } else if(id==="s-settings"){
+    add("Done","primary",()=>show(lastScreen));
+  }
+}
+
+// ---------- settings wiring ----------
+let lastScreen="s-import";
+$("#navSettings").onclick=()=>{ lastScreen=[...document.querySelectorAll(".screen")].find(s=>s.classList.contains("active"))?.id||"s-import"; openSettings(); };
+function openSettings(){
+  $("#elevenKey").value=settings.elevenKey;
+  $("#quality").value=settings.quality; $("#vadSens").value=settings.vad;
+  listDevices(); show("s-settings");
+}
+$("#elevenKey").oninput=e=>{settings.elevenKey=e.target.value.trim();localStorage.setItem("elevenKey",settings.elevenKey);};
+$("#quality").onchange=e=>{settings.quality=e.target.value;localStorage.setItem("quality",settings.quality);};
+$("#vadSens").oninput=e=>{settings.vad=+e.target.value;localStorage.setItem("vad",settings.vad);};
+$("#camSel").onchange=e=>{settings.cam=e.target.value;localStorage.setItem("cam",settings.cam);};
+$("#micSel").onchange=e=>{settings.mic=e.target.value;localStorage.setItem("mic",settings.mic);};
+
+// ---------- boot ----------
+deviceVoices();
+setActions("s-import");
+</script>
+</body>
+</html>
