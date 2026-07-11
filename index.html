@@ -65,9 +65,16 @@
     background:linear-gradient(to bottom,rgba(0,0,0,.78),rgba(0,0,0,.35),transparent);
     pointer-events:none;z-index:1;scroll-behavior:smooth}
   .cueline{color:rgba(255,255,255,.4);font-size:20px;line-height:1.45;margin:8px 0;text-shadow:0 1px 4px #000}
-  .cueline.on{color:#fff;font-weight:600}
+  .cueline.on{color:#ffce54;font-weight:600}
+  .cueline.on .w.sp{color:#000;text-shadow:none;opacity:.85}
   .cuec{color:var(--accent);font-size:12px;text-transform:uppercase;letter-spacing:.6px;display:block}
+  #cue.h{max-height:none;padding:12px 14px 28px}
+  #cue.h .cueline{display:none}
+  #cue.h .cueline.on{display:block;white-space:nowrap;overflow:hidden;font-size:27px}
+  #cue.h .cuec{display:inline;margin-right:10px}
   #flipCam,#cueToggle{z-index:2}
+  .learnline{font-size:24px;line-height:1.6;font-weight:600;margin:14px 0;min-height:80px}
+  .learnscore{font-size:15px;color:var(--accent);min-height:22px}
   .vstage{position:relative}
   .countdown{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:96px;font-weight:700;
     color:#fff;text-shadow:0 2px 12px #000;background:rgba(0,0,0,.35);border-radius:var(--radius)}
@@ -176,6 +183,29 @@
     <div id="takesList"></div>
   </section>
 
+  <!-- LEARN -->
+  <section class="screen" id="s-learn">
+    <h2>Learn your lines</h2>
+    <p class="sub" id="learnProg"></p>
+    <div class="card">
+      <div class="sm muted" id="learnCue"></div>
+      <div class="learnline" id="learnLine"></div>
+      <div class="learnscore" id="learnScore"></div>
+      <div class="row" style="flex-wrap:wrap;gap:8px">
+        <button class="btn sm" id="learnHear">▶ Hear cue</button>
+        <button class="btn sm" id="learnReveal">Reveal</button>
+        <button class="btn sm" id="learnSay">🎤 Say it</button>
+      </div>
+    </div>
+    <label class="fld">Difficulty</label>
+    <select id="learnLevel">
+      <option value="0">Full text</option><option value="1">Hide 25%</option>
+      <option value="2">Hide 50%</option><option value="3">Hide 75%</option>
+      <option value="4">First letters</option><option value="5">Fully hidden</option>
+    </select>
+    <p class="sm muted" style="margin-top:10px">Step the difficulty up each pass — read aloud, hide more, repeat until it's yours.</p>
+  </section>
+
   <!-- SETTINGS -->
   <section class="screen" id="s-settings">
     <h2>Settings</h2>
@@ -191,6 +221,13 @@
       <select id="micSel"></select>
       <label class="fld">Video quality</label>
       <select id="quality"><option value="1080">1080p</option><option value="720" selected>720p</option><option value="480">480p</option></select>
+    </div>
+    <div class="card">
+      <label class="fld" style="margin-top:0">Prompt layout</label>
+      <select id="cueLayout"><option value="v">Vertical (scrolling list)</option><option value="h">Horizontal (one line, ticker)</option></select>
+      <label class="fld">Patience on “…” pauses</label>
+      <input type="range" id="ellip" min="500" max="5000" step="250" style="width:100%">
+      <p class="sm muted" style="margin:8px 0 0">How long the reader holds back after your line ends with “…” before jumping in. Left = snappy, right = long dramatic pause.</p>
     </div>
     <div class="card">
       <label class="fld" style="margin-top:0">Auto-advance sensitivity</label>
@@ -229,6 +266,8 @@ const settings = {
   quality: localStorage.getItem("quality") || "720",
   vad: +(localStorage.getItem("vad") || 5),
   autocue: localStorage.getItem("autocue") !== "0",
+  layout: localStorage.getItem("layout") || "v",
+  ellip: +(localStorage.getItem("ellip") || 1500),
 };
 const ttsMode = () => settings.elevenKey ? "eleven" : "speech";
 
@@ -432,6 +471,57 @@ function playCue(i){
   return speakDevice(ln.text, S.voices[ln.character]);
 }
 
+// ---------- learn mode (progressive hiding, MemoCoach-style) ----------
+let L={idx:0, level:0, saying:false};
+const myLineIdxs=()=>S.lines.map((l,i)=>i).filter(i=>S.lines[i].character===S.myChar);
+function maskWord(w,lvl,seed){
+  if(lvl===0) return w;
+  if(lvl===4) return w[0]+"·".repeat(Math.max(w.length-1,1));
+  if(lvl===5) return "▁".repeat(Math.max(w.length,2));
+  const pct=[0,25,50,75][lvl];
+  return ((seed*2654435761>>>0)%100)<pct ? "▁".repeat(Math.max(w.length,2)) : w; // ponytail: hash-stable hiding, same words hide every pass
+}
+function renderLearn(){
+  const ids=myLineIdxs();
+  if(!ids.length){ $("#learnProg").textContent="No lines for "+S.myChar+" — check the parse."; return; }
+  L.idx=Math.max(0,Math.min(L.idx,ids.length-1));
+  const li=ids[L.idx], prev=li>0?S.lines[li-1]:null;
+  $("#learnProg").textContent=`Line ${L.idx+1} of ${ids.length} · ${S.myChar}`;
+  $("#learnCue").textContent=prev?`Cue — ${prev.character}: “${prev.text}”`:"(scene opens on your line)";
+  $("#learnLine").textContent=S.lines[li].text.split(/\s+/).map((w,i)=>maskWord(w,L.level,i+li*31)).join(" ");
+  $("#learnScore").textContent="";
+}
+$("#learnLevel").onchange=e=>{L.level=+e.target.value;renderLearn();};
+$("#learnReveal").onclick=()=>{const li=myLineIdxs()[L.idx];$("#learnLine").textContent=S.lines[li].text;};
+$("#learnHear").onclick=()=>{
+  const li=myLineIdxs()[L.idx];
+  if(li>0){ const p=S.lines[li-1];
+    if(S.clips[li-1]) new Audio(S.clips[li-1]).play();
+    else if(settings.elevenKey && S.voices[p.character]) elevenClip(p.text,S.voices[p.character].id).then(u=>{S.clips[li-1]=u;new Audio(u).play()}).catch(()=>speakDevice(p.text));
+    else speakDevice(p.text);
+  } else toast("This is the first line of the scene");
+};
+$("#learnSay").onclick=()=>{
+  if(L.saying){ L.saying=false; stopTracking(); $("#learnSay").textContent="🎤 Say it"; return; }
+  if(!SR){ toast("Speech recognition not supported in this browser"); return; }
+  const li=myLineIdxs()[L.idx];
+  L.saying=true; $("#learnSay").textContent="■ Stop"; $("#learnScore").textContent="Listening…";
+  trk.words=normWords(S.lines[li].text); trk.ptr=0; trk.seen=0; trk.lineIdx=-1; trk.active=true;
+  trk.onDone=null;
+  const r=new SR(); r.continuous=true; r.interimResults=true; r.lang="en-GB";
+  r.onresult=e=>{
+    const heard=[]; for(const res of e.results) heard.push(...normWords(res[0].transcript));
+    for(let k=trk.seen;k<heard.length;k++){const w=heard[k];
+      for(let j=trk.ptr;j<Math.min(trk.ptr+3,trk.words.length);j++) if(trk.words[j]===w){trk.ptr=j+1;break;}}
+    trk.seen=heard.length;
+    const pct=Math.round(100*trk.ptr/trk.words.length);
+    $("#learnScore").textContent=`${pct}% — ${trk.ptr}/${trk.words.length} words`;
+    if(trk.ptr>=trk.words.length){ $("#learnScore").textContent="100% — word perfect ✓"; L.saying=false; stopTracking(); $("#learnSay").textContent="🎤 Say it"; }
+  };
+  r.onend=()=>{ if(L.saying&&trk.active){try{r.start();}catch(e){}} };
+  try{ r.start(); trk.obj=r; }catch(e){ toast("Mic unavailable"); L.saying=false; }
+};
+
 // ---------- devices / media ----------
 async function listDevices(){
   try{
@@ -484,7 +574,8 @@ function loopVAD(){
       $("#levelBar").style.width=Math.min(100,level*320)+"%";
       if(vad.active){
         const speak=0.055-(settings.vad-5)*0.006;   // sensitivity → threshold
-        const hang=1200-(settings.vad-5)*90;          // ms of silence before firing
+        let hang=1200-(settings.vad-5)*90;            // ms of silence before firing
+        if(S.running && /(\.{3,}|…)/.test(S.lines[S.curIdx]?.text||"")) hang+=settings.ellip; // "…" in line → be patient
         const now=performance.now();
         if(level>speak){ vad.speaking=true; vad.silence=0; if(!vad.speechStart)vad.speechStart=now; }
         else if(vad.speaking){
@@ -504,6 +595,51 @@ function waitForActor(){ armVAD(); return new Promise(res=>{S.advanceResolve=res
 
 $("#advanceCue").onclick=()=>fireAdvance("tap");
 $("#repeatCue").onclick=()=>{ if(S.lastReaderIdx>=0) playCue(S.lastReaderIdx); };
+
+// ---------- word-level speech tracking ----------
+const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
+const normWords = t => t.toLowerCase().replace(/…/g," ").replace(/\.{2,}/g," ")
+  .replace(/[^a-z0-9' ]+/g," ").split(/\s+/).filter(Boolean);
+let trk={obj:null,words:[],ptr:0,seen:0,lineIdx:-1,onDone:null,active:false};
+function startTracking(lineIdx,onDone){
+  if(!SR) return false;
+  trk.words=normWords(S.lines[lineIdx].text); trk.ptr=0; trk.seen=0;
+  trk.lineIdx=lineIdx; trk.onDone=onDone; trk.active=true;
+  if(!trk.words.length){ onDone(); return true; }
+  const r=new SR(); r.continuous=true; r.interimResults=true; r.lang="en-GB";
+  r.onresult=e=>{
+    if(!trk.active) return;
+    const heard=[];
+    for(const res of e.results) heard.push(...normWords(res[0].transcript));
+    // consume only words not yet processed, fuzzy-match within a 3-word window
+    for(let k=trk.seen;k<heard.length;k++){
+      const w=heard[k];
+      for(let j=trk.ptr;j<Math.min(trk.ptr+3,trk.words.length);j++){
+        if(trk.words[j]===w){ trk.ptr=j+1; break; }
+      }
+    }
+    trk.seen=heard.length;
+    markSpoken(trk.lineIdx, trk.ptr);
+    if(trk.ptr>=trk.words.length){ const cb=trk.onDone; stopTracking(); cb&&cb(); }
+  };
+  r.onerror=()=>{}; r.onend=()=>{ if(trk.active){ try{r.start();}catch(e){} } };
+  try{ r.start(); }catch(e){ return false; }
+  trk.obj=r; return true;
+}
+function stopTracking(){ trk.active=false; if(trk.obj){try{trk.obj.stop();}catch(e){}} trk.obj=null; }
+
+async function awaitActorLine(i){
+  const done=new Promise(res=>{S.advanceResolve=res;});
+  const tracking=startTracking(i, ()=>fireAdvance("words"));
+  if(tracking) $("#listenLabel").textContent="Following your words…";
+  armVAD();                       // ponytail: VAD + tap stay armed as fallback; first signal wins
+  await done;
+  stopTracking(); markSpoken(i, 1e9);
+  const t=S.lines[i].text;
+  const m=t.match(/(\.{3,}|…+)\s*$/);
+  if(m) await sleep(settings.ellip);       // "…" patience knob
+  else if(tracking) await sleep(350);      // natural beat before the reader comes in
+}
 async function flipCamera(){ if(S.running || !camActive()) return; S.flipped=true; S.facing=S.facing==="user"?"environment":"user";
   try{ await startCamera(); }catch(e){ toast("Couldn't switch camera: "+e.message); } }
 $("#flipCam").onclick=flipCamera;
@@ -528,15 +664,23 @@ $("#enableCam").onclick=enableCamera;
 // ---------- autocue (teleprompter) ----------
 function buildAutocue(){
   const c=$("#cue"); c.innerHTML="";
+  c.classList.toggle("h", settings.layout==="h");
   S.lines.forEach((ln,i)=>{
     const d=el("div","cueline"); d.dataset.i=i;
     const who=el("span","cuec",ln.character+(ln.character===S.myChar?" · you":""));
-    d.append(who, document.createTextNode(ln.text));
+    d.append(who);
+    ln.text.split(/\s+/).forEach(w=>{ d.append(el("span","w",w)), d.append(document.createTextNode(" ")); });
     c.append(d);
   });
   applyAutocue(); highlightCue(S.running?S.curIdx:0);
 }
 function applyAutocue(){ $("#cue").style.display = settings.autocue ? "block" : "none"; }
+function markSpoken(lineIdx,n){
+  const d=$("#cue").querySelector(`.cueline[data-i="${lineIdx}"]`); if(!d) return;
+  const ws=d.querySelectorAll(".w");
+  ws.forEach((s,i)=>s.classList.toggle("sp", i<n));
+  if(settings.layout==="h" && n>0 && ws[n-1]) d.scrollLeft = Math.max(0, ws[n-1].offsetLeft - d.clientWidth*0.35);
+}
 function highlightCue(i){
   const c=$("#cue"); if(!settings.autocue) return;
   let cur=null;
@@ -574,7 +718,7 @@ async function runFrom(i){
     if(ln.character===S.myChar){
       $("#cueWho").innerHTML=`<b>Your line</b>`;
       $("#listenLabel").textContent="Listening — speak, or tap Next cue";
-      await waitForActor();
+      await awaitActorLine(S.curIdx);
     } else {
       $("#cueWho").innerHTML=`<b>${ln.character}</b> <span class="muted">· AI reader</span>`;
       $("#listenLabel").textContent=ln.character+" is reading…";
@@ -587,7 +731,7 @@ async function runFrom(i){
 }
 function stopRecording(){
   if(!S.running) return;
-  S.running=false; disarmVAD();
+  S.running=false; disarmVAD(); stopTracking();
   try{ speechSynthesis.cancel(); }catch(e){}
   if(S._audio){S._audio.pause();S._audio=null;}
   if(S.recorder && S.recorder.state!=="inactive") S.recorder.stop();
@@ -650,6 +794,7 @@ function setActions(id){
     add("Cast the scene →","primary",()=>{ if(!S.lines.length){toast("Add at least one line");return;} show("s-cast"); });
   } else if(id==="s-cast"){
     add("← Back","ghost",()=>show("s-review"));
+    add("Learn lines","ghost",()=>{ L.idx=0; renderLearn(); show("s-learn"); });
     add("Set up recording →","primary",()=>{
       if(!settings.elevenKey){ toast("Add your ElevenLabs API key in Settings to record"); openSettings(); return; }
       show("s-record");   // record screen shows the "Enable camera" overlay; user taps to grant
@@ -668,6 +813,10 @@ function setActions(id){
   } else if(id==="s-takes"){
     add("＋ New take","ghost",()=>show("s-record"));
     add("Done","primary",()=>show("s-import"));
+  } else if(id==="s-learn"){
+    add("← Back","ghost",()=>{ stopTracking(); L.saying=false; show("s-cast"); });
+    add("◀ Prev","",()=>{ L.idx--; renderLearn(); });
+    add("Next ▶","primary",()=>{ L.idx++; renderLearn(); });
   } else if(id==="s-settings"){
     add("Done","primary",()=>show(lastScreen));
   }
@@ -679,8 +828,11 @@ $("#navSettings").onclick=()=>{ lastScreen=[...document.querySelectorAll(".scree
 function openSettings(){
   $("#elevenKey").value=settings.elevenKey;
   $("#quality").value=settings.quality; $("#vadSens").value=settings.vad;
+  $("#cueLayout").value=settings.layout; $("#ellip").value=settings.ellip;
   listDevices(); show("s-settings");
 }
+$("#cueLayout").onchange=e=>{settings.layout=e.target.value;localStorage.setItem("layout",settings.layout);};
+$("#ellip").oninput=e=>{settings.ellip=+e.target.value;localStorage.setItem("ellip",settings.ellip);};
 $("#elevenKey").oninput=e=>{settings.elevenKey=e.target.value.trim();localStorage.setItem("elevenKey",settings.elevenKey);};
 $("#quality").onchange=e=>{settings.quality=e.target.value;localStorage.setItem("quality",settings.quality);};
 $("#vadSens").oninput=e=>{settings.vad=+e.target.value;localStorage.setItem("vad",settings.vad);};
