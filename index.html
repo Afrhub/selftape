@@ -880,7 +880,7 @@ function setActions(id){
   const bar=$("#actions"); bar.innerHTML="";
   const add=(label,cls,fn)=>{const b=el("button","btn "+(cls||""),label);b.onclick=fn;bar.append(b);return b;};
   if(id==="s-import"){
-    add("Parse sides →","primary",()=>{
+    add("Characters and lines →","primary",()=>{
       const t=$("#paste").value.trim();
       if(!t){toast("Paste or upload your sides first");return;}
       const lines=parseScript(t);
