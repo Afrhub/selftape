@@ -123,7 +123,35 @@
     </div>
     <input type="file" id="file" accept=".pdf,.txt,text/plain,application/pdf" hidden>
     <div id="importErr" class="warn" style="display:none"></div>
-    <button class="btn block" id="openAccent" style="margin-top:20px">🎤 Accent coach</button>
+    <div class="row" style="margin-top:20px;gap:10px">
+      <button class="btn" id="openAccent" style="flex:1">🎤 Accent coach</button>
+      <button class="btn" id="openVoice" style="flex:1">🗣 Voice gym</button>
+      <button class="btn" id="openCoaches" style="flex:1">👥 Coaches</button>
+    </div>
+  </section>
+
+  <!-- VOICE GYM -->
+  <section class="screen" id="s-voice">
+    <h2>Voice gym</h2>
+    <p class="sub">Daily warm-ups and workouts. Use the live meter to see your breath support and volume in real time.</p>
+    <div class="card">
+      <div class="row"><b>Live meter</b><span class="sp"></span><button class="btn sm" id="meterBtn">Start mic</button></div>
+      <div class="listen" style="margin-top:10px"><span id="pitchOut" class="sm muted" style="min-width:80px">— Hz</span>
+        <span class="level" style="height:10px"><i id="vLevel"></i></span></div>
+    </div>
+    <div id="voiceExercises"></div>
+  </section>
+
+  <!-- COACHES -->
+  <section class="screen" id="s-coaches">
+    <h2>Coaches</h2>
+    <p class="sub">Acting and accent coaches for when you need a human ear. Listings are curated — apply below to be included.</p>
+    <div id="coachList"></div>
+    <div class="card">
+      <b>Are you a coach?</b>
+      <p class="sm muted" style="margin:6px 0 10px">Get listed in front of working actors preparing real auditions.</p>
+      <a class="btn sm" href="mailto:coaches@selftape.app?subject=Coach%20listing%20application">Apply to be listed</a>
+    </div>
   </section>
 
   <!-- ACCENT COACH -->
@@ -710,6 +738,113 @@ function renderAccent(){
 }
 $("#openAccent").onclick=()=>{ renderAccent(); show("s-accent"); };
 
+// ---------- voice gym ----------
+const VOICE_EX=[
+ {cat:"Breath & support", ex:[
+   {t:"Box breathing", d:"In for 4, hold 4, out 4, hold 4. Four rounds. Shoulders stay down — breathe into the belly."},
+   {t:"Sustained hiss", d:"Deep breath, then a steady 'sss' for as long as possible. Watch the live meter — the bar should stay level, not fade. Beat your time each round."},
+   {t:"Counted exhale", d:"One breath, count aloud to 20 at speaking volume. Keep the meter steady to the last number."}]},
+ {cat:"Articulation", rec:true, ex:[
+   {t:"Red leather, yellow leather", d:"Five times, slow to fast, every consonant landing."},
+   {t:"Unique New York", d:"You know you need unique New York. Five times, crisp N and Y."},
+   {t:"The tip of the tongue", d:"The tip of the tongue, the teeth, the lips — three times, exaggerate the mouth shapes."}]},
+ {cat:"Resonance", ex:[
+   {t:"Hum slide", d:"Hum an 'mmm' and feel it buzz in the lips and nose. Slide from chest to head voice and back."},
+   {t:"Ng glide", d:"Say 'sing', hold the 'ng', glide up and down. Watch the pitch readout move smoothly — no jumps."}]},
+ {cat:"Projection", ex:[
+   {t:"Target throw", d:"Say 'Hey — over here!' to the far wall, not the phone. The meter should spike without the voice cracking. Support from the belly, not the throat."},
+   {t:"Floor to ceiling", d:"Same line at a whisper, normal, full stage volume. Three clean levels on the meter."}]},
+ {cat:"Pitch & range", ex:[
+   {t:"Siren", d:"'Woo' from your lowest comfortable note to highest and back. Watch the Hz readout — aim for a smooth sweep, wider each day."},
+   {t:"Step ladder", d:"Count 1–8 stepping the pitch up each number, then back down. Even steps on the readout."}]},
+];
+let VG={stream:null,ctx:null,an:null,raf:0,recording:null,url:null};
+function renderVoice(){
+  const wrap=$("#voiceExercises"); if(wrap.dataset.done) return; wrap.dataset.done=1;
+  VOICE_EX.forEach(g=>{
+    const h=el("label","fld",g.cat); wrap.append(h);
+    g.ex.forEach(x=>{
+      const c=el("div","card"); const t=el("div",null,x.t); t.style.fontWeight="600";
+      c.append(t, el("p","sm muted",x.d)); c.lastChild.style.margin="6px 0 0";
+      if(g.rec){
+        const row=el("div","row"); row.style.marginTop="10px";
+        const rb=el("button","btn sm","🎙 Record"); const pb=el("button","btn sm","▶ Play back"); pb.disabled=true;
+        rb.onclick=async()=>{
+          if(VG.recording){ VG.recording.stop(); return; }
+          try{
+            const st=await navigator.mediaDevices.getUserMedia({audio:true});
+            const ch=[]; VG.recording=new MediaRecorder(st);
+            VG.recording.ondataavailable=e=>ch.push(e.data);
+            VG.recording.onstop=()=>{ st.getTracks().forEach(tr=>tr.stop());
+              if(VG.url)URL.revokeObjectURL(VG.url); VG.url=URL.createObjectURL(new Blob(ch));
+              pb.disabled=false; VG.recording=null; rb.textContent="🎙 Record"; };
+            VG.recording.start(); rb.textContent="■ Stop";
+          }catch(e){ toast("Mic blocked: "+e.message); }
+        };
+        pb.onclick=()=>{ if(VG.url) new Audio(VG.url).play(); };
+        row.append(rb,pb); c.append(row);
+      }
+      wrap.append(c);
+    });
+  });
+}
+// live level + pitch (autocorrelation) — the meter IS the feedback
+function pitchHz(buf,sr){
+  let best=-1,bestI=-1; const n=buf.length;
+  let rms=0; for(let i=0;i<n;i++)rms+=buf[i]*buf[i];
+  if(Math.sqrt(rms/n)<0.015) return 0;                 // silence
+  for(let lag=Math.floor(sr/500); lag<Math.floor(sr/70); lag++){ // 70–500 Hz
+    let sum=0; for(let i=0;i<n-lag;i++) sum+=buf[i]*buf[i+lag];
+    if(sum>best){best=sum;bestI=lag;}
+  }
+  return bestI>0? Math.round(sr/bestI) : 0;
+}
+async function toggleMeter(){
+  if(VG.stream){ cancelAnimationFrame(VG.raf); VG.stream.getTracks().forEach(t=>t.stop());
+    VG.ctx.close(); VG.stream=null; $("#meterBtn").textContent="Start mic";
+    $("#vLevel").style.width="0"; $("#pitchOut").textContent="— Hz"; return; }
+  try{
+    VG.stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    VG.ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=VG.ctx.createMediaStreamSource(VG.stream);
+    VG.an=VG.ctx.createAnalyser(); VG.an.fftSize=2048; src.connect(VG.an);
+    const buf=new Float32Array(VG.an.fftSize);
+    $("#meterBtn").textContent="Stop mic";
+    const step=()=>{ if(!VG.stream) return;
+      VG.an.getFloatTimeDomainData(buf);
+      let s=0; for(let i=0;i<buf.length;i++)s+=buf[i]*buf[i];
+      $("#vLevel").style.width=Math.min(100,Math.sqrt(s/buf.length)*320)+"%";
+      const hz=pitchHz(buf,VG.ctx.sampleRate);
+      $("#pitchOut").textContent=hz?hz+" Hz":"— Hz";
+      VG.raf=requestAnimationFrame(step); };
+    step();
+  }catch(e){ toast("Mic blocked: "+e.message); }
+}
+$("#meterBtn").onclick=toggleMeter;
+$("#openVoice").onclick=()=>{ renderVoice(); show("s-voice"); };
+
+// ---------- coach directory ----------
+// ponytail: static founding list — becomes a real marketplace when coaches apply.
+// Entries below are placeholders, clearly labelled; never invent real people.
+const COACHES=[
+ {name:"Founding coach slot", tag:"Accent & dialect", blurb:"RP, Cockney, General American. Zoom sessions.", placeholder:true},
+ {name:"Founding coach slot", tag:"Audition technique", blurb:"Self-tape direction and scene prep for screen.", placeholder:true},
+ {name:"Founding coach slot", tag:"Voice & speech", blurb:"Breath, resonance and projection for stage and screen.", placeholder:true},
+];
+function renderCoaches(){
+  const wrap=$("#coachList"); wrap.innerHTML="";
+  COACHES.forEach(c=>{
+    const card=el("div","card");
+    const top=el("div","row"); const n=el("b",null,c.name);
+    top.append(n, el("span","pill",c.tag)); card.append(top);
+    card.append(el("p","sm muted",c.blurb)); card.lastChild.style.margin="6px 0 0";
+    if(c.placeholder){ const p=el("p","sm",""); p.style.margin="8px 0 0"; p.style.color="var(--warn)";
+      p.textContent="Open slot — this listing is waiting for a real coach."; card.append(p); }
+    wrap.append(card);
+  });
+}
+$("#openCoaches").onclick=()=>{ renderCoaches(); show("s-coaches"); };
+
 // ---------- devices / media ----------
 async function listDevices(){
   try{
@@ -1027,6 +1162,10 @@ function setActions(id){
     add("Next ▶","primary",()=>{ L.idx++; renderLearn(); });
   } else if(id==="s-accent"){
     add("← Back","primary",()=>{ if(AC.rec){AC.rec.stop();} show("s-import"); });
+  } else if(id==="s-voice"){
+    add("← Back","primary",()=>{ if(VG.stream)toggleMeter(); if(VG.recording)VG.recording.stop(); show("s-import"); });
+  } else if(id==="s-coaches"){
+    add("← Back","primary",()=>show("s-import"));
   } else if(id==="s-settings"){
     add("Done","primary",()=>show(lastScreen));
   }
