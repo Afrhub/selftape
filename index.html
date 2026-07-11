@@ -317,7 +317,9 @@ function parseScript(text){
   const isScene = s => /^(INT|EXT|INT\.\/EXT|I\/E)[. ]/i.test(s) ||
     /^(FADE|CUT TO|SMASH CUT|DISSOLVE|SCENE \d|TITLE|SUPER)/i.test(s) ||
     /^[A-Z .]+TO:$/.test(s) ||
-    /\b(DAY|NIGHT|MORNING|EVENING|CONTINUOUS|LATER)\.?$/.test(s) && allCaps(s) && /[-–—]/.test(s);
+    /\b(DAY|NIGHT|MORNING|EVENING|CONTINUOUS|LATER)\.?$/.test(s) && allCaps(s) && /[-–—]/.test(s) ||
+    // structural markers — never characters
+    allCaps(s) && /\b(MONTAGE|FLASHBACK|INTERCUT|INSERT|SERIES OF|SEQUENCE|TITLE CARD|CLOSE ON|ANGLE ON|POV|BACK TO|END OF|BEGIN|CHYRON|PRELAP|CREDITS|MOMENTS LATER|CONTINUOUS|DREAM)\b/.test(s);
   const parenOnly = s => /^\(.*\)$/.test(s);
   const inlineRe = /^([A-Za-z][A-Za-z0-9 .'’\-]{0,30}?):\s*(.+)$/;
   const cueRe = /^([A-Z][A-Z0-9 '’\-]{1,30}?)\s*(\((V\.?O\.?|O\.?S\.?|O\.?C\.?|CONT'?D)\.?\)|\(.*\))?$/;
@@ -359,12 +361,13 @@ window.__parserSelfCheck = function(){
     "SARAH","Where were you last night?","","JACK GRABS A CHAIR.","",
     "JACK (CONT'D)","(smiling)","Out. Just out.","","THE KETTLE SCREAMS.","",
     "SARAH: I don't believe you.","","CUT TO:","EXT. GARDEN - NIGHT","",
+    "MONTAGE SEQUENCE","They argue through the seasons.","END OF MONTAGE","",
     "MUM","Leave her alone."].join("\n");
   const r=parseScript(t);
   const chars=[...new Set(r.map(l=>l.character))];
   console.assert(r.length===4, "expected 4 lines, got", r.length, r);
   console.assert(chars.join()==="SARAH,JACK,MUM", "characters", chars);
-  console.assert(!chars.some(c=>/GRABS|KETTLE|INT\.|EXT\.|CUT/.test(c)), "action/location leaked into cast", chars);
+  console.assert(!chars.some(c=>/GRABS|KETTLE|INT\.|EXT\.|CUT|MONTAGE/.test(c)), "action/location leaked into cast", chars);
   console.assert(!r.some(l=>/sink|not turning/.test(l.text)), "stage direction leaked into dialogue", r);
   console.assert(r[1].character==="JACK" && r[1].text==="Out. Just out.", "cont'd cue", r[1]);
   console.log("parser self-check ok", r); return r;
