@@ -296,6 +296,17 @@ function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");cl
 function show(id){document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active",s.id===id));setActions(id);window.scrollTo(0,0);}
 
 // ---------- script parser ----------
+// repair "T h e  I n t e r n" extractions: if a line is mostly single-char
+// tokens, single spaces are letter gaps and 2+ spaces are word gaps
+function fixLetterSpacing(text){
+  return text.split(/\r?\n/).map(line=>{
+    const toks=line.trim().split(/ /).filter(Boolean);
+    if(toks.length<2) return line;
+    const singles=toks.filter(t=>t.length===1).length;
+    if(toks.length<4 ? singles!==toks.length : singles/toks.length<0.7) return line;
+    return line.trim().split(/ {2,}/).map(w=>w.replace(/ /g,"")).join(" ");
+  }).join("\n");
+}
 function parseScript(text){
   const raw = text.split(/\r?\n/);
   const out = []; let cur = null;
@@ -378,16 +389,21 @@ $("#file").addEventListener("change", async e=>{
       for(let p=1;p<=pdf.numPages;p++){
         const page = await pdf.getPage(p);
         const c = await page.getTextContent();
-        // rebuild lines using y-position so cues stay on their own line
-        let last=null, buf2="";
+        // rebuild lines by y-position; insert spaces only on real x-gaps
+        // (many PDFs emit one item per glyph — naive joining letter-spaces everything)
+        let lastY=null, lastEndX=null, buf2="";
         for(const it of c.items){
-          const y = it.transform[5];
-          if(last!==null && Math.abs(y-last)>3){ buf2+="\n"; }
-          buf2 += it.str + (it.hasEOL?"\n":" ");
-          last = y;
+          if(!it.str) continue;
+          const x=it.transform[4], y=it.transform[5], h=Math.abs(it.transform[3])||12;
+          if(lastY!==null && Math.abs(y-lastY)>h*0.5){ buf2+="\n"; lastEndX=null; }
+          else if(lastEndX!==null && x-lastEndX > h*0.22){ buf2+=" "; }
+          buf2 += it.str;
+          lastEndX = x + (it.width||0); lastY = y;
+          if(it.hasEOL){ buf2+="\n"; lastEndX=null; }
         }
         text += buf2 + "\n";
       }
+      text = fixLetterSpacing(text);
     } else {
       text = await f.text();
     }
