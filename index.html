@@ -545,9 +545,18 @@ async function pregenerate(onProg){
 function playCue(i){
   const ln=S.lines[i]; S.lastReaderIdx=i;
   if(ttsMode()==="eleven" && S.clips[i]){
-    return new Promise(res=>{const a=new Audio(S.clips[i]);a.onended=res;a.onerror=res;S._audio=a;a.play();});
+    return new Promise(res=>{
+      const a=new Audio(S.clips[i]);
+      try{ // route through the mix bus: speakers + recorded track
+        if(vad.ctx && S.mixDest){
+          const src=vad.ctx.createMediaElementSource(a);
+          src.connect(vad.ctx.destination); src.connect(S.mixDest);
+        }
+      }catch(e){/* plain speaker playback still works */}
+      a.onended=res;a.onerror=res;S._audio=a;a.play();
+    });
   }
-  return speakDevice(ln.text, S.voices[ln.character]);
+  return speakDevice(ln.text, S.voices[ln.character]); // ponytail: OS speech can't be captured; record mode always uses clips (key required)
 }
 
 // ---------- learn mode (progressive hiding, MemoCoach-style) ----------
@@ -638,8 +647,13 @@ function setupVAD(stream){
     const src=vad.ctx.createMediaStreamSource(stream);
     vad.analyser=vad.ctx.createAnalyser(); vad.analyser.fftSize=1024;
     vad.data=new Uint8Array(vad.analyser.fftSize); src.connect(vad.analyser);
+    // mix bus: mic + cue playback both feed the recorded audio track —
+    // echo cancellation strips speaker audio from the mic, so cues must be
+    // mixed in directly, not picked up from the room
+    S.mixDest=vad.ctx.createMediaStreamDestination();
+    src.connect(S.mixDest);
     loopVAD();
-  }catch(e){/* VAD optional; tap still works */}
+  }catch(e){ S.mixDest=null; /* VAD optional; tap still works */ }
 }
 function rms(){
   vad.analyser.getByteTimeDomainData(vad.data);
@@ -779,10 +793,15 @@ async function beginRecording(){
   $("#countdown").style.display="none";
   // recorder
   S.chunks=[]; const mime=pickMime();
-  S.recorder=new MediaRecorder(S.stream, mime?{mimeType:mime}:undefined);
+  if(vad.ctx && vad.ctx.state==="suspended") try{await vad.ctx.resume();}catch(e){}
+  // record video + the mixed audio bus (mic + cue clips); fall back to raw stream
+  const recStream = S.mixDest
+    ? new MediaStream([...S.stream.getVideoTracks(), ...S.mixDest.stream.getAudioTracks()])
+    : S.stream;
+  S.recorder=new MediaRecorder(recStream, mime?{mimeType:mime}:undefined);
   S.recorder.ondataavailable=e=>{if(e.data.size)S.chunks.push(e.data);};
   S.recorder.onstop=finalizeTake;
-  S.recorder.start();
+  S.recorder.start(1000);   // 1s timeslices — a hiccup can't corrupt the whole take
   S.running=true; S.curIdx=0; S.lastReaderIdx=-1;
   $("#recDot").style.display="inline-block";
   $("#listenBar").style.display="flex"; $("#cueControls").style.display="flex";
