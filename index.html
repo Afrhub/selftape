@@ -296,6 +296,21 @@ function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");cl
 function show(id){document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("active",s.id===id));setActions(id);window.scrollTo(0,0);}
 
 // ---------- script parser ----------
+// screenplay layout: action/narration sits at the left margin, dialogue is
+// indented deeper. Drop margin-level lines (keep INT./EXT. slugs for the
+// scene picker). If the PDF has no clear indent structure, keep everything.
+function stripActionByIndent(lines){
+  if(!lines.length) return "";
+  const buckets={};
+  lines.forEach(l=>{const b=Math.round(l.x/8)*8; buckets[b]=(buckets[b]||0)+1;});
+  const common=Object.entries(buckets).filter(([,n])=>n>=Math.max(2,lines.length*0.05))
+    .map(([x])=>+x).sort((a,b)=>a-b);
+  const margin=common[0];
+  const indented=common.find(x=>x>margin+25);
+  if(indented===undefined) return lines.map(l=>l.text).join("\n"); // flat layout — not a screenplay PDF
+  const keep=/^(INT|EXT|INT\.\/EXT|I\/E)[. ]|^SCENE \d/i;
+  return lines.filter(l=> l.x>=margin+20 || keep.test(l.text.trim())).map(l=>l.text).join("\n");
+}
 // repair "T h e  I n t e r n" extractions: if a line is mostly single-char
 // tokens, single spaces are letter gaps and 2+ spaces are word gaps
 function fixLetterSpacing(text){
@@ -343,6 +358,9 @@ function parseScript(text){
       push(); continue;                        // all-caps action shout ("SARAH GRABS THE KNIFE") — drop
     }
     if(parenOnly(s)) continue;                 // parenthetical stage direction
+    // narration backstop: "She casts a loaded look…" / "The interview starts rewinding…"
+    // pronoun/article + present-tense verb + full stop = stage direction, not speech
+    if(cur && /^(She|He|They|We|The [A-Z]?[a-z]+|It) [a-z]+(s|es)\b/.test(s) && /[.!]$/.test(s)){ push(); continue; }
     if(cur) cur.parts.push(s.replace(/^\(.*?\)\s*/,""));
     // else: mixed-case action line with no active speaker — stage direction, dropped
   }
@@ -389,24 +407,24 @@ $("#file").addEventListener("change", async e=>{
     if(f.type==="application/pdf" || f.name.toLowerCase().endsWith(".pdf")){
       const buf = await f.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+      const pdfLines=[];
       for(let p=1;p<=pdf.numPages;p++){
         const page = await pdf.getPage(p);
         const c = await page.getTextContent();
-        // rebuild lines by y-position; insert spaces only on real x-gaps
-        // (many PDFs emit one item per glyph — naive joining letter-spaces everything)
-        let lastY=null, lastEndX=null, buf2="";
+        // rebuild lines by y-position, keeping each line's start x (indent);
+        // insert spaces only on real x-gaps — glyph-per-item PDFs otherwise letter-space
+        let cl=null;
         for(const it of c.items){
           if(!it.str) continue;
           const x=it.transform[4], y=it.transform[5], h=Math.abs(it.transform[3])||12;
-          if(lastY!==null && Math.abs(y-lastY)>h*0.5){ buf2+="\n"; lastEndX=null; }
-          else if(lastEndX!==null && x-lastEndX > h*0.22){ buf2+=" "; }
-          buf2 += it.str;
-          lastEndX = x + (it.width||0); lastY = y;
-          if(it.hasEOL){ buf2+="\n"; lastEndX=null; }
+          if(!cl || Math.abs(y-cl.y)>h*0.5){ if(cl) pdfLines.push(cl); cl={x,y,endX:x+(it.width||0),text:it.str}; continue; }
+          if(x-cl.endX > h*0.22) cl.text+=" ";
+          cl.text+=it.str; cl.endX=x+(it.width||0);
+          if(it.hasEOL){ pdfLines.push(cl); cl=null; }
         }
-        text += buf2 + "\n";
+        if(cl) pdfLines.push(cl);
       }
-      text = fixLetterSpacing(text);
+      text = fixLetterSpacing(stripActionByIndent(pdfLines));
     } else {
       text = await f.text();
     }
