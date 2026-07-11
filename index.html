@@ -123,6 +123,18 @@
     </div>
     <input type="file" id="file" accept=".pdf,.txt,text/plain,application/pdf" hidden>
     <div id="importErr" class="warn" style="display:none"></div>
+    <button class="btn block" id="openAccent" style="margin-top:20px">🎤 Accent coach</button>
+  </section>
+
+  <!-- ACCENT COACH -->
+  <section class="screen" id="s-accent">
+    <h2>Accent coach</h2>
+    <p class="sub">Pick a target accent. Read the notes, hear the reference, record yourself, compare.</p>
+    <label class="fld">Target accent</label>
+    <select id="accentSel"></select>
+    <div class="card"><ul id="accentNotes" style="margin:0;padding-left:18px"></ul></div>
+    <label class="fld">Drill sentences</label>
+    <div id="accentDrills"></div>
   </section>
 
   <!-- SCENES -->
@@ -220,7 +232,9 @@
     <div class="card">
       <label class="fld" style="margin-top:0">ElevenLabs API key (optional)</label>
       <input type="password" id="elevenKey" placeholder="sk_… — enables natural, distinct voices">
-      <p class="sm muted" style="margin:8px 0 0">Without a key the app uses your device's built-in voices (free, but more robotic). The key stays on this device only.</p>
+      <p class="sm muted" style="margin:8px 0 0">Required before recording. The key stays on this device only.</p>
+      <button class="btn sm" id="copySetup" style="margin-top:10px">Copy setup link for another device</button>
+      <p class="sm muted" style="margin:6px 0 0">Open the copied link on your phone once — it stores the key there, so the phone flow matches this one.</p>
     </div>
     <div class="card">
       <label class="fld" style="margin-top:0">Camera</label>
@@ -630,6 +644,72 @@ $("#learnSay").onclick=()=>{
   try{ r.start(); trk.obj=r; }catch(e){ toast("Mic unavailable"); L.saying=false; }
 };
 
+// ---------- accent coach ----------
+// ponytail: listen-and-repeat with A/B playback. Speech recognition can't
+// judge phonetics, so the coach trains the ear, not a score.
+// Voice ids are ElevenLabs premade voices; swap in this array if retired.
+const ACCENTS=[
+ {name:"General American", voice:"TxGEqnHWrfWFTfGW9XjX",
+  notes:["Rhotic — sound every R: caR, haRd, foRty","T between vowels flaps to a soft D: butter → budder","Short flat A in bath, dance, can't"],
+  drills:["The hard part started early on Thursday.","Betty bought a little bit of better butter.","I can't dance at the party after work."]},
+ {name:"RP / Standard British", voice:"onwK4e9ZLuTAKqWW03F9",
+  notes:["Non-rhotic — drop R unless a vowel follows: caah, haahd","Long broad A: bAAth, grAAss, dAAnce","Crisp T sounds — no flapping: buTTer"],
+  drills:["The car parked rather far from the bar.","I'd rather have a bath than dance.","Better put a little water in the bottle."]},
+ {name:"Cockney / Estuary", voice:"ThT5KcBeYPX3keUQqHPh",
+  notes:["Glottal stop replaces T: bo'le of wa'er","TH becomes F or V: think → fink, brother → bruvver","L at word end becomes a W sound: milk → miwk"],
+  drills:["A little bottle of water for my brother.","I think that's a better bit of butter.","She's got a lovely little pool in Millwall."]},
+ {name:"Irish (Dublin)", voice:"D38z5RcWu1voky8WS1ja",
+  notes:["TH softens toward T/D: thirty → tirty, this → dis","Musical rise-and-fall intonation across the sentence","R is soft but present after vowels"],
+  drills:["Thirty-three and a third of the party arrived.","I thought this Thursday would be brighter.","She's after telling me the whole story."]},
+ {name:"Scottish (no AI reference yet)", voice:null,
+  notes:["Tapped or rolled R: giRRl, woRRd","Vowels shorten and purify: face and goat are single sounds","OO fronts: good and food share the same short vowel"],
+  drills:["The girl with the curls heard the birds first.","I put good food on the wooden table.","It's a fair bright night for a walk."]},
+ {name:"Australian", voice:"IKne3meq5aSn9XLyUdCD",
+  notes:["Non-rhotic like RP but vowels stretch: day → daaay","Rising intonation at ends of statements","I sound flattens: night → noight territory"],
+  drills:["Today I'm taking the late train to the game.","No way, mate — that snake's right by the gate.","She'll be right by the time we arrive tonight."]},
+];
+let AC={idx:0, rec:null, url:null, refCache:{}};
+function renderAccent(){
+  const sel=$("#accentSel");
+  if(!sel.options.length){ ACCENTS.forEach((a,i)=>{const o=el("option",null,a.name);o.value=i;sel.append(o);});
+    sel.onchange=()=>{AC.idx=+sel.value;renderAccent();}; }
+  const a=ACCENTS[AC.idx];
+  const ul=$("#accentNotes"); ul.innerHTML="";
+  a.notes.forEach(n=>ul.append(el("li",null,n)));
+  const wrap=$("#accentDrills"); wrap.innerHTML="";
+  a.drills.forEach(d=>{
+    const card=el("div","card");
+    card.append(el("div",null,d));
+    const row=el("div","row"); row.style.marginTop="10px";
+    const hear=el("button","btn sm","▶ Reference");
+    hear.onclick=async()=>{
+      if(!a.voice){ toast("No AI reference voice for this accent yet — use the notes and your ear"); return; }
+      if(!settings.elevenKey){ toast("Add your ElevenLabs key in Settings first"); return; }
+      const k=AC.idx+"|"+d;
+      try{ AC.refCache[k]=AC.refCache[k]||await elevenClip(d,a.voice); new Audio(AC.refCache[k]).play(); }
+      catch(e){ toast("Reference failed: "+e.message); }
+    };
+    const rec=el("button","btn sm","🎙 Record me");
+    const mine=el("button","btn sm","▶ Me"); mine.disabled=true;
+    rec.onclick=async()=>{
+      if(AC.rec){ AC.rec.stop(); return; }
+      try{
+        const st=await navigator.mediaDevices.getUserMedia({audio:true});
+        const chunks=[]; AC.rec=new MediaRecorder(st);
+        AC.rec.ondataavailable=e=>chunks.push(e.data);
+        AC.rec.onstop=()=>{ st.getTracks().forEach(t=>t.stop());
+          if(AC.url) URL.revokeObjectURL(AC.url);
+          AC.url=URL.createObjectURL(new Blob(chunks)); mine.disabled=false;
+          AC.rec=null; rec.textContent="🎙 Record me"; toast("Got it — compare with ▶ Reference"); };
+        AC.rec.start(); rec.textContent="■ Stop";
+      }catch(e){ toast("Mic blocked: "+e.message); }
+    };
+    mine.onclick=()=>{ if(AC.url) new Audio(AC.url).play(); };
+    row.append(hear,rec,mine); card.append(row); wrap.append(card);
+  });
+}
+$("#openAccent").onclick=()=>{ renderAccent(); show("s-accent"); };
+
 // ---------- devices / media ----------
 async function listDevices(){
   try{
@@ -945,6 +1025,8 @@ function setActions(id){
     add("← Back","ghost",()=>{ stopTracking(); L.saying=false; show("s-cast"); });
     add("◀ Prev","",()=>{ L.idx--; renderLearn(); });
     add("Next ▶","primary",()=>{ L.idx++; renderLearn(); });
+  } else if(id==="s-accent"){
+    add("← Back","primary",()=>{ if(AC.rec){AC.rec.stop();} show("s-import"); });
   } else if(id==="s-settings"){
     add("Done","primary",()=>show(lastScreen));
   }
@@ -959,6 +1041,12 @@ function openSettings(){
   $("#cueLayout").value=settings.layout; $("#ellip").value=settings.ellip;
   listDevices(); show("s-settings");
 }
+$("#copySetup").onclick=async()=>{
+  if(!settings.elevenKey){ toast("Enter your key first"); return; }
+  const url=location.origin+location.pathname+"#k="+encodeURIComponent(settings.elevenKey);
+  try{ await navigator.clipboard.writeText(url); toast("Setup link copied — open it on your phone"); }
+  catch(e){ prompt("Copy this link:", url); }
+};
 $("#cueLayout").onchange=e=>{settings.layout=e.target.value;localStorage.setItem("layout",settings.layout);};
 $("#ellip").oninput=e=>{settings.ellip=+e.target.value;localStorage.setItem("ellip",settings.ellip);};
 $("#elevenKey").oninput=e=>{settings.elevenKey=e.target.value.trim();localStorage.setItem("elevenKey",settings.elevenKey);};
@@ -968,6 +1056,14 @@ $("#camSel").onchange=e=>{settings.cam=e.target.value;localStorage.setItem("cam"
 $("#micSel").onchange=e=>{settings.mic=e.target.value;localStorage.setItem("mic",settings.mic);};
 
 // ---------- boot ----------
+// setup link: #k=<key> stores the ElevenLabs key on this device (lets you
+// set up the phone from the laptop without retyping), then cleans the URL
+if(location.hash.startsWith("#k=")){
+  settings.elevenKey=decodeURIComponent(location.hash.slice(3));
+  localStorage.setItem("elevenKey",settings.elevenKey);
+  history.replaceState(null,"",location.pathname);
+  toast("Setup complete — voices ready on this device");
+}
 deviceVoices();
 setActions("s-import");
 </script>
