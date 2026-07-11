@@ -125,6 +125,14 @@
     <div id="importErr" class="warn" style="display:none"></div>
   </section>
 
+  <!-- SCENES -->
+  <section class="screen" id="s-scenes">
+    <div class="steps"><span class="on"></span><span class="on"></span><span></span><span></span></div>
+    <h2>Pick your scenes</h2>
+    <p class="sub" id="scenesSub"></p>
+    <div id="scenesList"></div>
+  </section>
+
   <!-- REVIEW -->
   <section class="screen" id="s-review">
     <div class="steps"><span class="on"></span><span class="on"></span><span></span><span></span></div>
@@ -302,14 +310,16 @@ function parseScript(text){
   const parenOnly = s => /^\(.*\)$/.test(s);
   const inlineRe = /^([A-Za-z][A-Za-z0-9 .'’\-]{0,30}?):\s*(.+)$/;
   const cueRe = /^([A-Z][A-Z0-9 '’\-]{1,30}?)\s*(\((V\.?O\.?|O\.?S\.?|O\.?C\.?|CONT'?D)\.?\)|\(.*\))?$/;
-  const push = () => { if(cur){const t=cur.parts.join(" ").replace(/\s+/g," ").trim(); if(t) out.push({character:cur.character,text:t});} cur=null; };
+  const push = () => { if(cur){const t=cur.parts.join(" ").replace(/\s+/g," ").trim(); if(t) out.push({character:cur.character,text:t,scene:Math.max(sc,0)});} cur=null; };
+  const scenes=[]; let sc=-1;
+  const isSlug = s => /^(INT|EXT|INT\.\/EXT|I\/E)[. ]/i.test(s) || /^SCENE \d/i.test(s);
   for(let idx=0; idx<raw.length; idx++){
     const s = raw[idx].trim();
     if(!s){ push(); continue; }               // FD: blank line ends a dialogue block
-    if(isScene(s)){ push(); continue; }        // location / transition — never a character
+    if(isScene(s)){ push(); if(isSlug(s)){ sc++; scenes.push(norm(s)); } continue; } // slug starts a new scene
     let m;
     if((m = s.match(inlineRe)) && looksName(m[1].trim())){
-      push(); out.push({character:norm(m[1]), text:m[2].trim()}); continue;
+      push(); out.push({character:norm(m[1]), text:m[2].trim(), scene:Math.max(sc,0)}); continue;
     }
     if((m = s.match(cueRe)) && looksName(m[1].trim()) && allCaps(m[1].trim())
        && !/[.!?]$/.test(m[1].trim())){        // FD: cues never end in sentence punctuation
@@ -324,11 +334,12 @@ function parseScript(text){
     // else: mixed-case action line with no active speaker — stage direction, dropped
   }
   push();
-  // merge consecutive same-character blocks
+  // merge consecutive same-character blocks (never across a scene boundary)
   const merged=[];
   for(const l of out){const last=merged[merged.length-1];
-    if(last && last.character===l.character) last.text=(last.text+" "+l.text).trim();
+    if(last && last.character===l.character && last.scene===l.scene) last.text=(last.text+" "+l.text).trim();
     else merged.push({...l});}
+  merged.scenes = scenes.length ? scenes : ["FULL SCRIPT"];
   return merged;
 }
 // runnable self-check (open console, call __parserSelfCheck())
@@ -405,7 +416,20 @@ function renderReview(){
     r.append(name,ta,x); wrap.append(r);
   });
 }
-$("#addLine").onclick=()=>{S.lines.push({character:S.characters[0]||"CHARACTER",text:""});renderReview();};
+$("#addLine").onclick=()=>{S.lines.push({character:S.characters[0]||"CHARACTER",text:"",scene:0});renderReview();};
+
+function renderScenes(){
+  $("#scenesSub").textContent=`Found ${S.sceneNames.length} scenes in your sides. Tick the ones you're auditioning.`;
+  const wrap=$("#scenesList"); wrap.innerHTML="";
+  S.sceneNames.forEach((name,i)=>{
+    const n=S.allLines.filter(l=>l.scene===i).length;
+    const card=el("label","card row"); card.style.cursor="pointer";
+    const cb=el("input"); cb.type="checkbox"; cb.value=i; cb.checked=true; cb.style.width="20px"; cb.style.height="20px";
+    const meta=el("div"); const ttl=el("div",null,`Scene ${i+1} — ${name}`); ttl.style.fontWeight="600";
+    meta.append(ttl, el("div","sm muted",`${n} dialogue line${n===1?"":"s"}`));
+    card.append(cb,meta); wrap.append(card);
+  });
+}
 
 // ---------- cast ----------
 function renderCast(){
@@ -805,7 +829,17 @@ function setActions(id){
       if(!t){toast("Paste or upload your sides first");return;}
       const lines=parseScript(t);
       if(!lines.length){$("#importErr").style.display="block";$("#importErr").textContent="Couldn't find any character lines. Check the format, or add lines by hand on the next screen.";}
-      loadLines(lines.length?lines:[{character:"CHARACTER",text:""}]); show("s-review");
+      S.allLines=lines.length?lines:[{character:"CHARACTER",text:"",scene:0}];
+      S.sceneNames=lines.scenes||["FULL SCRIPT"];
+      if(S.sceneNames.length>1){ renderScenes(); show("s-scenes"); }
+      else { loadLines(S.allLines); show("s-review"); }
+    });
+  } else if(id==="s-scenes"){
+    add("← Back","ghost",()=>show("s-import"));
+    add("Use selected scenes →","primary",()=>{
+      const on=[...document.querySelectorAll('#scenesList input:checked')].map(c=>+c.value);
+      if(!on.length){toast("Tick at least one scene");return;}
+      loadLines(S.allLines.filter(l=>on.includes(l.scene))); show("s-review");
     });
   } else if(id==="s-review"){
     add("← Back","ghost",()=>show("s-import"));
