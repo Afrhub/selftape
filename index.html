@@ -295,24 +295,33 @@ function parseScript(text){
   const words = s => s.split(/\s+/).filter(Boolean).length;
   const looksName = s => s.length>0 && s.length<=30 && words(s)<=4;
   const allCaps = s => {const L=s.replace(/[^A-Za-z]/g,"");return L.length>0 && L===L.toUpperCase();};
-  const isScene = s => /^(INT|EXT|INT\.\/EXT|I\/E)[. ]/i.test(s) || /^(FADE|CUT TO|SMASH CUT|DISSOLVE|SCENE \d)/i.test(s);
+  const isScene = s => /^(INT|EXT|INT\.\/EXT|I\/E)[. ]/i.test(s) ||
+    /^(FADE|CUT TO|SMASH CUT|DISSOLVE|SCENE \d|TITLE|SUPER)/i.test(s) ||
+    /^[A-Z .]+TO:$/.test(s) ||
+    /\b(DAY|NIGHT|MORNING|EVENING|CONTINUOUS|LATER)\.?$/.test(s) && allCaps(s) && /[-–—]/.test(s);
   const parenOnly = s => /^\(.*\)$/.test(s);
   const inlineRe = /^([A-Za-z][A-Za-z0-9 .'’\-]{0,30}?):\s*(.+)$/;
-  const cueRe = /^([A-Z][A-Z0-9 .'’\-]{1,30})\s*(\(.*\))?$/;
+  const cueRe = /^([A-Z][A-Z0-9 '’\-]{1,30}?)\s*(\((V\.?O\.?|O\.?S\.?|O\.?C\.?|CONT'?D)\.?\)|\(.*\))?$/;
   const push = () => { if(cur){const t=cur.parts.join(" ").replace(/\s+/g," ").trim(); if(t) out.push({character:cur.character,text:t});} cur=null; };
-  for(const line of raw){
-    const s = line.trim();
-    if(!s) continue;
-    if(isScene(s)){ push(); continue; }
+  for(let idx=0; idx<raw.length; idx++){
+    const s = raw[idx].trim();
+    if(!s){ push(); continue; }               // FD: blank line ends a dialogue block
+    if(isScene(s)){ push(); continue; }        // location / transition — never a character
     let m;
     if((m = s.match(inlineRe)) && looksName(m[1].trim())){
       push(); out.push({character:norm(m[1]), text:m[2].trim()}); continue;
     }
-    if((m = s.match(cueRe)) && looksName(m[1].trim()) && allCaps(m[1].trim())){
-      push(); cur = {character:norm(m[1]), parts:[]}; continue;
+    if((m = s.match(cueRe)) && looksName(m[1].trim()) && allCaps(m[1].trim())
+       && !/[.!?]$/.test(m[1].trim())){        // FD: cues never end in sentence punctuation
+      // FD: a cue must be immediately followed by dialogue/parenthetical, not blank/heading/another cue
+      let nxt=""; for(let j=idx+1;j<raw.length;j++){ if(raw[j].trim()){ nxt=raw[j].trim(); break; } if(raw[j]===raw[idx+1]&&!raw[j].trim()) break; }
+      const nextIsDialogue = nxt && !isScene(nxt) && !(nxt.match(cueRe)&&allCaps(nxt.replace(/\(.*\)/,"").trim())&&looksName(nxt.replace(/\(.*\)/,"").trim())) && raw[idx+1]!==undefined && raw[idx+1].trim()!=="";
+      if(nextIsDialogue){ push(); cur = {character:norm(m[1]), parts:[]}; continue; }
+      push(); continue;                        // all-caps action shout ("SARAH GRABS THE KNIFE") — drop
     }
-    if(parenOnly(s)) continue;              // stage direction
-    if(cur) cur.parts.push(s.replace(/^\(.*?\)\s*/,"")); // strip leading parenthetical
+    if(parenOnly(s)) continue;                 // parenthetical stage direction
+    if(cur) cur.parts.push(s.replace(/^\(.*?\)\s*/,""));
+    // else: mixed-case action line with no active speaker — stage direction, dropped
   }
   push();
   // merge consecutive same-character blocks
@@ -324,12 +333,18 @@ function parseScript(text){
 }
 // runnable self-check (open console, call __parserSelfCheck())
 window.__parserSelfCheck = function(){
-  const t="INT. KITCHEN - DAY\nSARAH\nWhere were you last night?\nJACK\n(smiling)\nOut. Just out.\nSARAH: I don't believe you.";
+  const t=["INT. KITCHEN - DAY","","Sarah stands at the sink, not turning round.","",
+    "SARAH","Where were you last night?","","JACK GRABS A CHAIR.","",
+    "JACK (CONT'D)","(smiling)","Out. Just out.","","THE KETTLE SCREAMS.","",
+    "SARAH: I don't believe you.","","CUT TO:","EXT. GARDEN - NIGHT","",
+    "MUM","Leave her alone."].join("\n");
   const r=parseScript(t);
-  console.assert(r.length===3, "expected 3 lines, got", r.length, r);
-  console.assert(r[0].character==="SARAH", "line0", r[0]);
-  console.assert(r[1].character==="JACK" && /Out/.test(r[1].text), "line1", r[1]);
-  console.assert(r[2].character==="SARAH" && /believe/.test(r[2].text), "line2", r[2]);
+  const chars=[...new Set(r.map(l=>l.character))];
+  console.assert(r.length===4, "expected 4 lines, got", r.length, r);
+  console.assert(chars.join()==="SARAH,JACK,MUM", "characters", chars);
+  console.assert(!chars.some(c=>/GRABS|KETTLE|INT\.|EXT\.|CUT/.test(c)), "action/location leaked into cast", chars);
+  console.assert(!r.some(l=>/sink|not turning/.test(l.text)), "stage direction leaked into dialogue", r);
+  console.assert(r[1].character==="JACK" && r[1].text==="Out. Just out.", "cont'd cue", r[1]);
   console.log("parser self-check ok", r); return r;
 };
 
@@ -410,7 +425,10 @@ function renderCast(){
     sel.onchange=()=>S.voices[c]={mode:"eleven",id:sel.value};
     const prev=el("button","btn sm ghost","▶"); prev.title="Preview";
     prev.onclick=()=>previewVoice(c);
-    r.append(sel,prev); list.append(r);
+    const rm=el("button","x","✕"); rm.title="Not a character — remove this role and its lines";
+    rm.onclick=()=>{ if(confirm(`Remove "${c}" and its ${S.lines.filter(l=>l.character===c).length} line(s)? Use this when the parser mistook stage direction for a character.`)){
+      S.lines=S.lines.filter(l=>l.character!==c); delete S.voices[c]; renderCast(); } };
+    r.append(sel,prev,rm); list.append(r);
   });
   const my2=el("div","castrow"); my2.append(el("span","name",S.myChar),el("span","me-badge","YOU"));
   list.prepend(my2);
